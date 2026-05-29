@@ -16,8 +16,14 @@ function bool(value: string | undefined, fallback: boolean): boolean {
 
 export const env = {
   port: Number(process.env.API_PORT ?? 8787),
-  // Where local adapter data (D1 shards, R2 blobs) is stored.
-  dataDir: process.env.DATA_DIR ?? new URL("../.data/", import.meta.url).pathname,
+  // Where local adapter data (D1 shards, R2 blobs) is stored. Lazy: only the
+  // Node backend reads this. On Cloudflare the module is evaluated at startup
+  // but `import.meta.url` is not a usable base there, so computing it eagerly
+  // would throw ("Invalid URL string") during the Worker's validation. A getter
+  // defers the `new URL(...)` until something on Node actually needs it.
+  get dataDir(): string {
+    return process.env.DATA_DIR ?? new URL("../.data/", import.meta.url).pathname;
+  },
   // Number of D1 shards (PRD 8.4: initial shard count 4).
   shardCount: Number(process.env.D1_SHARD_COUNT ?? 4),
 
