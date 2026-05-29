@@ -1,0 +1,9 @@
+{
+  "//": "Fast CF typecheck: type-checks worker.ts + cf/* against the minimal cf-stubs.d.ts (no @cloudflare/workers-types loaded), for environments where the full workers-types compile is too heavy. tsconfig.worker.json is the authoritative check against the real types at deploy time.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["cf-stubs.d.ts", "src/worker.ts", "src/adapters/cf"],
+  "exclude": []
+}

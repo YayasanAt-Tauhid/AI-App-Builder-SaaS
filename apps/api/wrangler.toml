@@ -1,0 +1,82 @@
+# wrangler.toml — Cloudflare Workers deployment for the AI App Builder API.
+#
+# This realizes the PRD's edge stack (§7, §8.2): the Hono app runs on Workers
+# with D1 (sharded), R2, KV, the CreditMeter Durable Object, and Queues. The
+# same handlers run locally on Node via adapters (see src/adapters/node), so
+# this file is the only Cloudflare-specific wiring needed to go live.
+#
+# Before first deploy:
+#   1. Create the resources and paste the returned ids below:
+#        wrangler d1 create aiab-shard-0   (… 1, 2, 3)
+#        wrangler r2 bucket create aiab-blobs
+#        wrangler kv namespace create KV
+#        wrangler queues create aiab-jobs
+#   2. Apply the schema to every shard:
+#        wrangler d1 migrations apply aiab-shard-0   (… 1, 2, 3)
+#   3. Set secrets:
+#        wrangler secret put ANTHROPIC_API_KEY        (and CLERK_*, STRIPE_*)
+#   4. Deploy:
+#        wrangler deploy
+
+name = "aiab-api"
+main = "src/worker.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+SHARD_COUNT = "4"
+WEB_ORIGIN = "http://localhost:3000"
+
+# --- D1: one database per shard (PRD §8.4). shard = hash(user_id) % SHARD_COUNT.
+[[d1_databases]]
+binding = "DB_0"
+database_name = "aiab-shard-0"
+database_id = "REPLACE_WITH_SHARD_0_ID"
+migrations_dir = "migrations"
+
+[[d1_databases]]
+binding = "DB_1"
+database_name = "aiab-shard-1"
+database_id = "REPLACE_WITH_SHARD_1_ID"
+migrations_dir = "migrations"
+
+[[d1_databases]]
+binding = "DB_2"
+database_name = "aiab-shard-2"
+database_id = "REPLACE_WITH_SHARD_2_ID"
+migrations_dir = "migrations"
+
+[[d1_databases]]
+binding = "DB_3"
+database_name = "aiab-shard-3"
+database_id = "REPLACE_WITH_SHARD_3_ID"
+migrations_dir = "migrations"
+
+# --- R2: project blobs, manifests, export zips, thumbnails (PRD §11.3).
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "aiab-blobs"
+
+# --- KV: prompt dedup + soft rate limits (PRD §11.2).
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# --- Queues: thumbnail render + zip pre-build, off the request path (PRD §6.8).
+[[queues.producers]]
+binding = "QUEUE"
+queue = "aiab-jobs"
+
+[[queues.consumers]]
+queue = "aiab-jobs"
+max_batch_size = 10
+max_retries = 3
+
+# --- Durable Objects: the CreditMeter (one instance per user, PRD §13).
+[[durable_objects.bindings]]
+name = "CREDIT_METER"
+class_name = "CreditMeterDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CreditMeterDO"]

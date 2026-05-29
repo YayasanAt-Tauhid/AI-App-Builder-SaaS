@@ -1,0 +1,10 @@
+{
+  "//": "Type-checks the Cloudflare Worker entry + cf/* adapters with workers-types. Kept separate from tsconfig.json so the (much larger) workers-types is loaded only here, and the main Node typecheck stays fast.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "@cloudflare/workers-types"]
+  },
+  "include": ["src/worker.ts", "src/adapters/cf"],
+  "exclude": [],
+  "//note": "Loads @cloudflare/workers-types; in a constrained environment give it room (NODE_OPTIONS=--max-old-space-size). Verifies the CF entry + adapters against the real binding types."
+}
