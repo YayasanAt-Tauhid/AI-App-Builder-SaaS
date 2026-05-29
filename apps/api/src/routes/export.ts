@@ -21,7 +21,7 @@ export const exportRoute = new Hono<{ Variables: { auth: AuthContext } }>();
 exportRoute.post("/:id/export", async (c) => {
   const auth = getAuth(c);
   const id = c.req.param("id");
-  const project = projects.get(auth.clerkUserId, id);
+  const project = await projects.get(auth.clerkUserId, id);
   if (!project || project.userId !== auth.userId) return c.json({ error: "not_found" }, 404);
 
   const body = (await c.req.json().catch(() => ({}))) as { versionId?: string };
@@ -29,10 +29,10 @@ exportRoute.post("/:id/export", async (c) => {
   if (!versionId) return c.json({ error: "no_version" }, 400);
 
   // Build on demand if the queue hasn't pre-built it yet.
-  if (!r2.exists(r2keys.exportZip(id, versionId))) {
+  if (!(await r2.exists(r2keys.exportZip(id, versionId)))) {
     const zip = await buildZip(auth.clerkUserId, id, versionId);
     if (!zip) return c.json({ error: "version_not_found" }, 404);
-    r2.putBytes(r2keys.exportZip(id, versionId), zip);
+    await r2.putBytes(r2keys.exportZip(id, versionId), zip);
   }
 
   analytics.track("project_exported", { userId: auth.userId, projectId: id, versionId });
@@ -45,15 +45,15 @@ exportRoute.get("/:id/export/:vid", async (c) => {
   const auth = getAuth(c);
   const id = c.req.param("id");
   const vid = c.req.param("vid");
-  const project = projects.get(auth.clerkUserId, id);
+  const project = await projects.get(auth.clerkUserId, id);
   if (!project || project.userId !== auth.userId) return c.json({ error: "not_found" }, 404);
 
-  let bytes = r2.getBytes(r2keys.exportZip(id, vid));
+  let bytes = await r2.getBytes(r2keys.exportZip(id, vid));
   if (!bytes) {
     const zip = await buildZip(auth.clerkUserId, id, vid);
     if (!zip) return c.json({ error: "version_not_found" }, 404);
-    r2.putBytes(r2keys.exportZip(id, vid), zip);
-    bytes = Buffer.from(zip);
+    await r2.putBytes(r2keys.exportZip(id, vid), zip);
+    bytes = zip;
   }
 
   c.header("Content-Type", "application/zip");

@@ -11,30 +11,32 @@
 import { SIGNUP_GRANT_CREDITS } from "@aiab/shared";
 import type { Plan, User } from "@aiab/shared";
 import { users } from "../db/repo.js";
-import { getCreditMeter, resetCreditMeter } from "../adapters/credit-meter.js";
+import { getCreditMeter } from "../adapters/credit-meter.js";
 import { analytics } from "../util/logger.js";
 
 /** Get the user for a Clerk id, creating + granting credits if they're new. */
 export async function ensureUser(clerkUserId: string, email: string): Promise<User> {
-  const existing = users.getByClerkId(clerkUserId);
+  const existing = await users.getByClerkId(clerkUserId);
   if (existing) return existing;
 
-  const user = users.create({ clerkUserId, email, plan: "free", credits: 0 });
+  const user = await users.create({ clerkUserId, email, plan: "free", credits: 0 });
   // Grant free credits through the meter so the ledger + live balance agree.
-  await getCreditMeter(clerkUserId).grant(SIGNUP_GRANT_CREDITS, "signup_grant");
+  const meter = await getCreditMeter(clerkUserId);
+  await meter.grant(SIGNUP_GRANT_CREDITS, "signup_grant");
   analytics.track("signup_completed", { userId: user.id });
   // Re-read so the returned balance reflects the grant.
-  return users.getByClerkId(clerkUserId) ?? user;
+  return (await users.getByClerkId(clerkUserId)) ?? user;
 }
 
 /** Apply a plan change (Stripe/Clerk webhook). Refills credits on upgrade. */
 export async function applyPlanChange(clerkUserId: string, plan: Plan, refillCredits?: number): Promise<void> {
-  const user = users.getByClerkId(clerkUserId);
+  const user = await users.getByClerkId(clerkUserId);
   if (!user) return;
-  users.setPlan(clerkUserId, plan);
-  resetCreditMeter(clerkUserId); // rehydrate with the new plan + balance
+  await users.setPlan(clerkUserId, plan);
+  const meter = await getCreditMeter(clerkUserId);
+  await meter.setPlan(plan); // keep the live meter's plan in sync (concurrency slots)
   if (refillCredits && refillCredits > 0) {
-    await getCreditMeter(clerkUserId).grant(refillCredits, "plan_refill");
+    await meter.grant(refillCredits, "plan_refill");
   }
   analytics.track("plan_upgraded", { userId: user.id, plan });
 }

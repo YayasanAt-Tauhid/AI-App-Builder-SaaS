@@ -9,8 +9,8 @@
 import type { VersionManifest } from "@aiab/shared";
 import { r2, r2keys } from "../adapters/r2.js";
 
-export function loadManifest(projectId: string, versionId: string): VersionManifest | null {
-  const raw = r2.getText(r2keys.manifest(projectId, versionId));
+export async function loadManifest(projectId: string, versionId: string): Promise<VersionManifest | null> {
+  const raw = await r2.getText(r2keys.manifest(projectId, versionId));
   if (!raw) return null;
   try {
     return JSON.parse(raw) as VersionManifest;

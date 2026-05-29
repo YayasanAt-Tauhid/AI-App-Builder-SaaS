@@ -15,8 +15,7 @@ import { Hono } from "hono";
 import { PLAN_LIMITS } from "@aiab/shared";
 import type { AuthContext } from "../auth/middleware.js";
 import { getAuth } from "../auth/middleware.js";
-import { transactions } from "../db/repo.js";
-import { getCreditMeter } from "../adapters/credit-meter.js";
+import { transactions, users } from "../db/repo.js";
 import { applyPlanChange } from "../services/provisioning.js";
 import { env } from "../env.js";
 import { analytics } from "../util/logger.js";
@@ -24,14 +23,15 @@ import { createCheckoutSession, createPortalSession } from "../services/stripe.j
 
 export const billingRoute = new Hono<{ Variables: { auth: AuthContext } }>();
 
-// GET /api/credits — balance + recent transactions.
-billingRoute.get("/credits", (c) => {
+// GET /api/credits — balance + recent transactions. The durable D1 row mirrors
+// the live CreditMeter balance on every settle/grant, so it's the read source.
+billingRoute.get("/credits", async (c) => {
   const auth = getAuth(c);
-  const meter = getCreditMeter(auth.clerkUserId);
+  const user = await users.getByClerkId(auth.clerkUserId);
   return c.json({
-    balance: meter.getBalance(),
-    plan: meter.getPlan(),
-    recent: transactions.recent(auth.clerkUserId, auth.userId, 20),
+    balance: user?.creditsBalance ?? 0,
+    plan: auth.plan,
+    recent: await transactions.recent(auth.clerkUserId, auth.userId, 20),
   });
 });
 

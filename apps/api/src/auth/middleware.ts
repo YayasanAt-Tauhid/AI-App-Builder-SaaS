@@ -18,7 +18,6 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Plan } from "@aiab/shared";
 import { env } from "../env.js";
 import { ensureUser } from "../services/provisioning.js";
-import { users } from "../db/repo.js";
 
 export interface AuthContext {
   userId: string;
@@ -72,11 +71,11 @@ export async function authMiddleware(c: Context, next: Next) {
   await next();
 }
 
-/** Read the AuthContext set by the middleware (and refresh plan from D1). */
+/**
+ * Read the AuthContext set by the middleware. The plan is already fresh: the
+ * middleware re-provisions (reads the current user row) on every request, so a
+ * mid-session plan change via webhook is reflected on the next request.
+ */
 export function getAuth(c: Context): AuthContext {
-  const auth = c.get("auth") as AuthContext;
-  // Plan may have changed via webhook mid-session; keep it fresh for gating.
-  const fresh = users.getByClerkId(auth.clerkUserId);
-  if (fresh) auth.plan = fresh.plan;
-  return auth;
+  return c.get("auth") as AuthContext;
 }

@@ -6,9 +6,14 @@
  * real data. Safe to run repeatedly (it no-ops if the dev user already exists).
  */
 
+import { env } from "./env.js";
+import { setBackend } from "./adapters/runtime.js";
+import { createNodeBackend } from "./adapters/node/backend.js";
 import { ensureUser } from "./services/provisioning.js";
 import { runGeneration } from "./services/generation.js";
 import { users } from "./db/repo.js";
+
+setBackend(createNodeBackend({ dataDir: env.dataDir, shardCount: env.shardCount }));
 
 async function consume(gen: AsyncGenerator<unknown>) {
   // Drain the generation stream to completion (we don't need the SSE events).
@@ -18,7 +23,7 @@ async function consume(gen: AsyncGenerator<unknown>) {
 async function main() {
   const clerkUserId = "dev_user";
   await ensureUser(clerkUserId, "dev@dev.local");
-  const user = users.getByClerkId(clerkUserId)!;
+  const user = (await users.getByClerkId(clerkUserId))!;
   const auth = { userId: user.id, clerkUserId, email: user.email, plan: user.plan };
 
   const seeds = [

@@ -15,9 +15,9 @@ export async function buildZip(
   projectId: string,
   versionId: string
 ): Promise<Uint8Array | null> {
-  const version = versions.get(shardKey, versionId);
+  const version = await versions.get(shardKey, versionId);
   if (!version || version.projectId !== projectId) return null;
-  const manifest = loadManifest(projectId, versionId);
+  const manifest = await loadManifest(projectId, versionId);
   if (!manifest) return null;
 
   const zip = new JSZip();

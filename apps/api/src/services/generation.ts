@@ -61,7 +61,8 @@ export async function abortGeneration(generationId: string): Promise<number> {
   const entry = inFlight.get(generationId);
   if (!entry) return 0;
   entry.controller.abort();
-  const { refunded } = await getCreditMeter(entry.clerkUserId).refund(generationId);
+  const meter = await getCreditMeter(entry.clerkUserId);
+  const { refunded } = await meter.refund(generationId);
   inFlight.delete(generationId);
   analytics.track("generation_aborted", { generationId });
   return refunded;
@@ -96,7 +97,7 @@ export async function* runGeneration(params: GenerationParams): AsyncGenerator<S
   // --- 2. Prompt dedup cache (PRD §10.3) ----------------------------------
   const hash = contentHash(prompt, modelId, contextFiles ?? []);
   if (!skipDedup) {
-    const cached = kv.get(kvKeys.dedup(auth.userId, hash));
+    const cached = await kv.get(kvKeys.dedup(auth.userId, hash));
     if (cached) {
       const { versionId, projectId } = JSON.parse(cached);
       analytics.track("dedup_hit", { userId: auth.userId });
@@ -111,7 +112,7 @@ export async function* runGeneration(params: GenerationParams): AsyncGenerator<S
 
   // --- 3. Reserve credits + concurrency slot (CreditMeter DO) -------------
   const generationId = uuid();
-  const meter = getCreditMeter(shardKey);
+  const meter = await getCreditMeter(shardKey);
   const est = estimateCredits(
     modelId,
     prompt.length,
@@ -176,7 +177,7 @@ export async function* runGeneration(params: GenerationParams): AsyncGenerator<S
     let projectId = params.projectId;
     let parentVersionId: string | null = null;
     if (projectId) {
-      const project = projects.get(shardKey, projectId);
+      const project = await projects.get(shardKey, projectId);
       if (!project || project.userId !== auth.userId) {
         await meter.refund(generationId);
         yield { event: "error", data: { code: "not_found", message: "Project not found." } };
@@ -184,7 +185,7 @@ export async function* runGeneration(params: GenerationParams): AsyncGenerator<S
       }
       parentVersionId = project.currentVersionId;
     } else {
-      const project = projects.create(shardKey, {
+      const project = await projects.create(shardKey, {
         userId: auth.userId,
         name: deriveProjectName(prompt),
         defaultModel: modelId,
@@ -196,16 +197,16 @@ export async function* runGeneration(params: GenerationParams): AsyncGenerator<S
     // --- 5c. Write blobs + manifest to R2 (key layout per PRD §11.3) ------
     const manifestKey = r2keys.manifest(projectId, versionId);
     for (const file of manifest.files) {
-      r2.putText(r2keys.file(projectId, versionId, file.path), file.content);
+      await r2.putText(r2keys.file(projectId, versionId, file.path), file.content);
     }
-    r2.putText(manifestKey, JSON.stringify(manifest));
+    await r2.putText(manifestKey, JSON.stringify(manifest));
 
     // --- 5d. Settle actual credits --------------------------------------
     const actualCredits = tokensToCredits(modelId, usage.inputTokens, usage.outputTokens);
     const settled = await meter.settle(generationId, actualCredits, versionId);
 
     // --- 5e. Insert the Version row + advance current version ------------
-    versions.create(shardKey, {
+    await versions.create(shardKey, {
       id: versionId,
       projectId,
       parentVersionId,
@@ -215,10 +216,10 @@ export async function* runGeneration(params: GenerationParams): AsyncGenerator<S
       contentHash: hash,
       creditsCost: settled.debited,
     });
-    projects.update(shardKey, projectId, { currentVersionId: versionId, defaultModel: modelId });
+    await projects.update(shardKey, projectId, { currentVersionId: versionId, defaultModel: modelId });
 
     // --- 5f. Save dedup entry + invalidate caches (PRD §10.3, §10.5) -----
-    kv.put(
+    await kv.put(
       kvKeys.dedup(auth.userId, hash),
       JSON.stringify({ versionId, projectId, ts: Date.now() }),
       120 // 2 minutes

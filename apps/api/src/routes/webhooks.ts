@@ -40,7 +40,7 @@ webhooksRoute.post("/clerk", async (c) => {
       // Profile sync — nothing security-relevant to change locally for now.
       break;
     case "user.deleted":
-      users.softDelete(clerkUserId);
+      await users.softDelete(clerkUserId);
       break;
     default:
       log.info("webhook.clerk.ignored", { type });
@@ -62,10 +62,10 @@ webhooksRoute.post("/stripe", async (c) => {
     case "checkout.session.completed":
     case "customer.subscription.updated":
     case "invoice.paid": {
-      if (clerkUserId && users.getByClerkId(clerkUserId)) {
+      if (clerkUserId && (await users.getByClerkId(clerkUserId))) {
         await applyPlanChange(clerkUserId, "pro", PLAN_LIMITS.pro.monthlyCredits);
-        const u = users.getByClerkId(clerkUserId)!;
-        subscriptions.upsert(clerkUserId, {
+        const u = (await users.getByClerkId(clerkUserId))!;
+        await subscriptions.upsert(clerkUserId, {
           userId: u.id,
           stripeSubscriptionId: obj.subscription ?? obj.id,
           plan: "pro",
@@ -78,7 +78,7 @@ webhooksRoute.post("/stripe", async (c) => {
       break;
     }
     case "customer.subscription.deleted": {
-      if (clerkUserId && users.getByClerkId(clerkUserId)) {
+      if (clerkUserId && (await users.getByClerkId(clerkUserId))) {
         await applyPlanChange(clerkUserId, "free");
       }
       break;

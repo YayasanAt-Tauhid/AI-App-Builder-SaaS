@@ -64,14 +64,17 @@ cp apps/web/.env.example apps/web/.env.local
 ## Architecture
 
 ```
-apps/web   Next.js 16 (App Router, RSC) · React 19 · Tailwind v4 · Monaco · Sandpack · SWR
-apps/api   Hono API (portable) + Node server
-           ├─ adapters/d1.ts          sharded SQLite  → Cloudflare D1 (shard by user)
-           ├─ adapters/r2.ts          filesystem      → Cloudflare R2 (file blobs/zips)
-           ├─ adapters/kv.ts          in-memory TTL   → Cloudflare KV (dedup, rate limit)
-           ├─ adapters/edge-cache.ts  in-memory SWR   → Workers Cache API
-           ├─ adapters/credit-meter.ts serialized DO  → CreditMeter Durable Object
-           ├─ services/queue.ts       async in-proc   → Cloudflare Queues
+apps/web   Next.js 16 (App Router, RSC) · React 19 · Tailwind v4 (ShadCN/UI on Radix)
+           · Monaco · Sandpack · SWR · Clerk (optional, dev-auth fallback)
+apps/api   Hono API (portable) — runs on Node or Cloudflare via a pluggable Backend
+           ├─ adapters/runtime.ts     Backend interface + holder (Node | Cloudflare)
+           ├─ adapters/sql.ts         async D1-shaped SQL interface + shard hash
+           ├─ adapters/node/*         better-sqlite3 (sharded) · filesystem R2 · in-mem KV
+           ├─ adapters/cf/*           D1 (sharded) · R2 · KV · CreditMeter Durable Object
+           ├─ adapters/edge-cache.ts  in-isolate SWR  → Workers Cache semantics
+           ├─ services/queue.ts       job contract    → in-proc (Node) | Queue (CF)
+           ├─ app.ts                  the Hono app (shared, side-effect free)
+           ├─ index.ts / worker.ts    Node server | Cloudflare Worker entrypoints
            └─ ai/*                    Anthropic / OpenAI / DeepSeek / Gemini + mock
 packages/shared   Types, the 8-model catalog, and pure credit/hash logic (used by both)
 ```
@@ -108,9 +111,40 @@ invalidate the project-list edge cache. Abort **refunds** and releases the slot.
 
 ## Going to production (Cloudflare)
 
-The handler logic is plain Hono, so each adapter maps to its Cloudflare binding:
-D1 (sharded), R2, KV, a `CreditMeter` Durable Object class, and a Queue consumer.
-Add a `wrangler.toml` with those bindings, set provider/Clerk/Stripe secrets,
-and point the web app's `NEXT_PUBLIC_API_URL` at the deployed Worker.
+The handler logic is plain Hono, and the storage layer is runtime-agnostic: the
+same code runs on Node (via `src/adapters/node/*`) or on Cloudflare (via
+`src/adapters/cf/*`), selected by a `Backend` installed at startup. The
+Cloudflare target is wired and ready in `apps/api`:
+
+- **`src/worker.ts`** — the Worker entry (`fetch` + Queue `consumer`), serving
+  the same Hono `app` and re-exporting the `CreditMeterDO` Durable Object.
+- **`wrangler.toml`** — bindings for D1 (one DB per shard), R2, KV, the Queue,
+  and the CreditMeter Durable Object.
+- **`migrations/0001_init.sql`** — the D1 schema (mirrors `src/db/schema.ts`).
+
+Deploy from `apps/api`:
+
+```bash
+# 1. Create resources, paste the ids into wrangler.toml
+wrangler d1 create aiab-shard-0   # …1, 2, 3
+wrangler r2 bucket create aiab-blobs
+wrangler kv namespace create KV
+wrangler queues create aiab-jobs
+
+# 2. Apply the schema to every shard
+pnpm --filter @aiab/api cf:migrate
+
+# 3. Set secrets (any subset; everything has a mock fallback)
+wrangler secret put ANTHROPIC_API_KEY   # and CLERK_*, STRIPE_*
+
+# 4. Deploy, then point the web app at the Worker URL
+pnpm --filter @aiab/api cf:deploy        # NEXT_PUBLIC_API_URL=https://aiab-api.<acct>.workers.dev
+```
+
+> The data layer is async end-to-end (D1's API). The Node backend wraps
+> better-sqlite3 in the same async D1-shaped interface, so local dev, tests, and
+> the edge build exercise identical handler code. The CreditMeter runs in-process
+> locally and inside the Durable Object on Cloudflare — same class, same
+> serialization/idempotency guarantees.
 
 See `apps/api/.env.example` for every supported key and what enabling it unlocks.

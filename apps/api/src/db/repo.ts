@@ -1,10 +1,13 @@
 /**
- * repo.ts — Typed data access over the sharded D1 layer.
+ * repo.ts — Typed data access over the sharded SQL layer (D1 on CF, better-sqlite3 locally).
  *
- * Every function takes a `shardKey` (the Clerk user id) so it can resolve the
- * correct shard before reading/writing. This is the one place that knows about
- * SQL; routes and services speak in domain types only. Row→object mapping
- * converts snake_case columns to the camelCase shapes in @aiab/shared.
+ * Every function takes a `shardKey` (the Clerk user id) so the backend can
+ * resolve the correct shard before reading/writing. This is the one place that
+ * knows about SQL; routes and services speak in domain types only. The SQL API
+ * is D1's (`prepare(sql).bind(...).first()/.all()/.run()`), so this file is
+ * identical on both runtimes — only the backend behind `getBackend().sql()`
+ * differs. Row→object mapping converts snake_case columns to the camelCase
+ * shapes in @aiab/shared.
  */
 
 import type {
@@ -15,10 +18,11 @@ import type {
   User,
   Version,
 } from "@aiab/shared";
-import { db } from "../adapters/d1.js";
+import { getBackend } from "../adapters/runtime.js";
 import { uuid } from "../util/id.js";
 
 const now = () => new Date().toISOString();
+const sql = (shardKey: string) => getBackend().sql(shardKey);
 
 // ---- Row mappers --------------------------------------------------------
 
@@ -80,14 +84,15 @@ function toTxn(r: Row): CreditTransaction {
 // ---- Users --------------------------------------------------------------
 
 export const users = {
-  getByClerkId(clerkUserId: string): User | null {
-    const row = db(clerkUserId)
+  async getByClerkId(clerkUserId: string): Promise<User | null> {
+    const row = await sql(clerkUserId)
       .prepare("SELECT * FROM users WHERE clerk_user_id = ?")
-      .get(clerkUserId) as Row | undefined;
+      .bind(clerkUserId)
+      .first<Row>();
     return row ? toUser(row) : null;
   },
 
-  create(input: { clerkUserId: string; email: string; plan?: Plan; credits?: number }): User {
+  async create(input: { clerkUserId: string; email: string; plan?: Plan; credits?: number }): Promise<User> {
     const ts = now();
     const user: User = {
       id: uuid(),
@@ -98,40 +103,43 @@ export const users = {
       createdAt: ts,
       updatedAt: ts,
     };
-    db(input.clerkUserId)
+    await sql(input.clerkUserId)
       .prepare(
         `INSERT INTO users (id, clerk_user_id, email, plan, credits_balance, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(user.id, user.clerkUserId, user.email, user.plan, user.creditsBalance, ts, ts);
+      .bind(user.id, user.clerkUserId, user.email, user.plan, user.creditsBalance, ts, ts)
+      .run();
     return user;
   },
 
-  setBalance(clerkUserId: string, balance: number): void {
-    db(clerkUserId)
+  async setBalance(clerkUserId: string, balance: number): Promise<void> {
+    await sql(clerkUserId)
       .prepare("UPDATE users SET credits_balance = ?, updated_at = ? WHERE clerk_user_id = ?")
-      .run(balance, now(), clerkUserId);
+      .bind(balance, now(), clerkUserId)
+      .run();
   },
 
-  setPlan(clerkUserId: string, plan: Plan): void {
-    db(clerkUserId)
+  async setPlan(clerkUserId: string, plan: Plan): Promise<void> {
+    await sql(clerkUserId)
       .prepare("UPDATE users SET plan = ?, updated_at = ? WHERE clerk_user_id = ?")
-      .run(plan, now(), clerkUserId);
+      .bind(plan, now(), clerkUserId)
+      .run();
   },
 
-  softDelete(clerkUserId: string): void {
+  async softDelete(clerkUserId: string): Promise<void> {
     // Remove the user's row; projects are tidied by the soft-delete window job.
-    db(clerkUserId).prepare("DELETE FROM users WHERE clerk_user_id = ?").run(clerkUserId);
+    await sql(clerkUserId).prepare("DELETE FROM users WHERE clerk_user_id = ?").bind(clerkUserId).run();
   },
 };
 
 // ---- Projects -----------------------------------------------------------
 
 export const projects = {
-  create(
+  async create(
     shardKey: string,
     input: { userId: string; name: string; description?: string; defaultModel: string }
-  ): Project {
+  ): Promise<Project> {
     const ts = now();
     const p: Project = {
       id: uuid(),
@@ -146,22 +154,23 @@ export const projects = {
       createdAt: ts,
       updatedAt: ts,
     };
-    db(shardKey)
+    await sql(shardKey)
       .prepare(
         `INSERT INTO projects (id, user_id, name, description, current_version_id, default_model,
            thumbnail_url, status, deleted_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, NULL, ?, NULL, 'active', NULL, ?, ?)`
       )
-      .run(p.id, p.userId, p.name, p.description, p.defaultModel, ts, ts);
+      .bind(p.id, p.userId, p.name, p.description, p.defaultModel, ts, ts)
+      .run();
     return p;
   },
 
-  list(
+  async list(
     shardKey: string,
     userId: string,
     opts: { search?: string; sort?: "updated" | "created" | "name"; limit?: number; offset?: number } = {}
-  ): { rows: Project[]; total: number } {
-    const conn = db(shardKey);
+  ): Promise<{ rows: Project[]; total: number }> {
+    const conn = sql(shardKey);
     const search = opts.search ? `%${opts.search.toLowerCase()}%` : null;
     const order =
       opts.sort === "name"
@@ -171,25 +180,28 @@ export const projects = {
           : "updated_at DESC";
     const where = `user_id = ? AND status = 'active'` + (search ? " AND lower(name) LIKE ?" : "");
     const params: any[] = search ? [userId, search] : [userId];
-    const total = (
-      conn.prepare(`SELECT COUNT(*) AS c FROM projects WHERE ${where}`).get(...params) as Row
-    ).c as number;
-    const rows = conn
+    const countRow = await conn
+      .prepare(`SELECT COUNT(*) AS c FROM projects WHERE ${where}`)
+      .bind(...params)
+      .first<Row>();
+    const total = (countRow?.c as number) ?? 0;
+    const { results } = await conn
       .prepare(`SELECT * FROM projects WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`)
-      .all(...params, opts.limit ?? 50, opts.offset ?? 0) as Row[];
-    return { rows: rows.map(toProject), total };
+      .bind(...params, opts.limit ?? 50, opts.offset ?? 0)
+      .all<Row>();
+    return { rows: results.map(toProject), total };
   },
 
-  get(shardKey: string, id: string): Project | null {
-    const row = db(shardKey).prepare("SELECT * FROM projects WHERE id = ?").get(id) as Row | undefined;
+  async get(shardKey: string, id: string): Promise<Project | null> {
+    const row = await sql(shardKey).prepare("SELECT * FROM projects WHERE id = ?").bind(id).first<Row>();
     return row ? toProject(row) : null;
   },
 
-  update(
+  async update(
     shardKey: string,
     id: string,
     patch: Partial<Pick<Project, "name" | "description" | "defaultModel" | "currentVersionId" | "thumbnailUrl">>
-  ): void {
+  ): Promise<void> {
     const sets: string[] = [];
     const vals: any[] = [];
     if (patch.name !== undefined) (sets.push("name = ?"), vals.push(patch.name));
@@ -201,20 +213,21 @@ export const projects = {
     if (sets.length === 0) return;
     sets.push("updated_at = ?");
     vals.push(now(), id);
-    db(shardKey).prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+    await sql(shardKey).prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
   },
 
-  softDelete(shardKey: string, id: string): void {
-    db(shardKey)
+  async softDelete(shardKey: string, id: string): Promise<void> {
+    await sql(shardKey)
       .prepare("UPDATE projects SET status = 'deleted', deleted_at = ?, updated_at = ? WHERE id = ?")
-      .run(now(), now(), id);
+      .bind(now(), now(), id)
+      .run();
   },
 };
 
 // ---- Versions -----------------------------------------------------------
 
 export const versions = {
-  create(
+  async create(
     shardKey: string,
     input: {
       id?: string;
@@ -226,7 +239,7 @@ export const versions = {
       contentHash: string;
       creditsCost: number;
     }
-  ): Version {
+  ): Promise<Version> {
     const v: Version = {
       id: input.id ?? uuid(),
       projectId: input.projectId,
@@ -238,13 +251,13 @@ export const versions = {
       creditsCost: input.creditsCost,
       createdAt: now(),
     };
-    db(shardKey)
+    await sql(shardKey)
       .prepare(
         `INSERT INTO versions (id, project_id, parent_version_id, prompt, model_used,
            file_manifest_key, content_hash, credits_cost, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(
+      .bind(
         v.id,
         v.projectId,
         v.parentVersionId,
@@ -254,19 +267,21 @@ export const versions = {
         v.contentHash,
         v.creditsCost,
         v.createdAt
-      );
+      )
+      .run();
     return v;
   },
 
-  list(shardKey: string, projectId: string): Version[] {
-    const rows = db(shardKey)
+  async list(shardKey: string, projectId: string): Promise<Version[]> {
+    const { results } = await sql(shardKey)
       .prepare("SELECT * FROM versions WHERE project_id = ? ORDER BY created_at DESC")
-      .all(projectId) as Row[];
-    return rows.map(toVersion);
+      .bind(projectId)
+      .all<Row>();
+    return results.map(toVersion);
   },
 
-  get(shardKey: string, id: string): Version | null {
-    const row = db(shardKey).prepare("SELECT * FROM versions WHERE id = ?").get(id) as Row | undefined;
+  async get(shardKey: string, id: string): Promise<Version | null> {
+    const row = await sql(shardKey).prepare("SELECT * FROM versions WHERE id = ?").bind(id).first<Row>();
     return row ? toVersion(row) : null;
   },
 };
@@ -274,10 +289,10 @@ export const versions = {
 // ---- Credit transactions (the durable ledger) ---------------------------
 
 export const transactions = {
-  add(
+  async add(
     shardKey: string,
     input: { userId: string; delta: number; reason: CreditReason; refVersionId?: string | null }
-  ): CreditTransaction {
+  ): Promise<CreditTransaction> {
     const txn: CreditTransaction = {
       id: uuid(),
       userId: input.userId,
@@ -286,27 +301,29 @@ export const transactions = {
       refVersionId: input.refVersionId ?? null,
       createdAt: now(),
     };
-    db(shardKey)
+    await sql(shardKey)
       .prepare(
         `INSERT INTO credit_transactions (id, user_id, delta, reason, ref_version_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run(txn.id, txn.userId, txn.delta, txn.reason, txn.refVersionId, txn.createdAt);
+      .bind(txn.id, txn.userId, txn.delta, txn.reason, txn.refVersionId, txn.createdAt)
+      .run();
     return txn;
   },
 
-  recent(shardKey: string, userId: string, limit = 20): CreditTransaction[] {
-    const rows = db(shardKey)
+  async recent(shardKey: string, userId: string, limit = 20): Promise<CreditTransaction[]> {
+    const { results } = await sql(shardKey)
       .prepare("SELECT * FROM credit_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?")
-      .all(userId, limit) as Row[];
-    return rows.map(toTxn);
+      .bind(userId, limit)
+      .all<Row>();
+    return results.map(toTxn);
   },
 };
 
 // ---- Subscriptions ------------------------------------------------------
 
 export const subscriptions = {
-  upsert(
+  async upsert(
     shardKey: string,
     input: {
       userId: string;
@@ -315,25 +332,28 @@ export const subscriptions = {
       status: "active" | "canceled" | "past_due";
       currentPeriodEnd?: string;
     }
-  ): void {
-    const conn = db(shardKey);
-    const existing = conn.prepare("SELECT id FROM subscriptions WHERE user_id = ?").get(input.userId) as
-      | Row
-      | undefined;
+  ): Promise<void> {
+    const conn = sql(shardKey);
+    const existing = await conn
+      .prepare("SELECT id FROM subscriptions WHERE user_id = ?")
+      .bind(input.userId)
+      .first<Row>();
     if (existing) {
-      conn
+      await conn
         .prepare(
           `UPDATE subscriptions SET stripe_subscription_id = ?, plan = ?, status = ?, current_period_end = ?
            WHERE user_id = ?`
         )
-        .run(input.stripeSubscriptionId ?? null, input.plan, input.status, input.currentPeriodEnd ?? null, input.userId);
+        .bind(input.stripeSubscriptionId ?? null, input.plan, input.status, input.currentPeriodEnd ?? null, input.userId)
+        .run();
     } else {
-      conn
+      await conn
         .prepare(
           `INSERT INTO subscriptions (id, user_id, stripe_subscription_id, plan, status, current_period_end)
            VALUES (?, ?, ?, ?, ?, ?)`
         )
-        .run(uuid(), input.userId, input.stripeSubscriptionId ?? null, input.plan, input.status, input.currentPeriodEnd ?? null);
+        .bind(uuid(), input.userId, input.stripeSubscriptionId ?? null, input.plan, input.status, input.currentPeriodEnd ?? null)
+        .run();
     }
   },
 };

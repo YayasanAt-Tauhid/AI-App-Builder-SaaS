@@ -7,6 +7,10 @@ dist/
 .next/
 out/
 build/
+*.tsbuildinfo
+
+# Wrangler (Cloudflare) local state
+.wrangler/
 
 # Local runtime data (D1 shards, R2 blobs, KV) — created at runtime, never committed
 apps/api/.data/

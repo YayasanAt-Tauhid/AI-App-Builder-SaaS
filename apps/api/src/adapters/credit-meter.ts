@@ -1,30 +1,46 @@
 /**
- * credit-meter.ts — Local model of the CreditMeter Durable Object (PRD §13).
+ * credit-meter.ts — CreditMeter (PRD §13), runtime-agnostic.
  *
  * A Durable Object is Cloudflare's single-threaded, strongly-consistent compute
  * primitive: exactly one instance per user, processing one operation at a time.
  * That property is what makes credit accounting safe — no two generations can
- * race to overspend or double-debit. We reproduce it here with:
+ * race to overspend or double-debit. The `CreditMeter` class below reproduces
+ * it with a per-user async mutex, idempotency on generationId, and plan-based
+ * concurrency slots (Free 1 / Pro 3).
  *
- *   • One CreditMeter instance per user (keyed by Clerk id), created lazily.
- *   • A per-user async mutex so reserve/settle/refund run serialized.
- *   • Idempotency keyed on generationId (retries/duplicate webhooks are safe).
- *   • Concurrency slots enforced from the plan (Free 1 / Pro 3).
- *
- * The live balance lives here; the durable ledger lives in D1. On settle/refill
- * we write both, keeping the DO and the ledger consistent (PRD §13.1).
+ * The class is used **directly** on both runtimes: in-process on Node, and
+ * *inside* the CreditMeterDO Durable Object on Cloudflare (which provides the
+ * real single-instance/single-thread guarantee). The live balance lives in the
+ * meter; the durable ledger lives in D1 — settle/grant write both (§13.1).
  */
 
 import { PLAN_LIMITS } from "@aiab/shared";
 import type { CreditReason, Plan } from "@aiab/shared";
 import { transactions, users } from "../db/repo.js";
+import { getBackend } from "./runtime.js";
 import { log } from "../util/logger.js";
 
 export type ReserveResult =
   | { ok: true; reserved: number }
   | { ok: false; status: 402 | 409; code: string; message: string };
 
-class CreditMeter {
+/**
+ * The cross-runtime surface the generation/billing code depends on. Satisfied
+ * both by the `CreditMeter` class (Node) and by the Durable Object stub (CF).
+ */
+export interface CreditMeterHandle {
+  reserve(generationId: string, est: number): Promise<ReserveResult>;
+  settle(
+    generationId: string,
+    actual: number,
+    refVersionId?: string | null
+  ): Promise<{ debited: number; balance: number }>;
+  refund(generationId: string): Promise<{ refunded: number }>;
+  grant(amount: number, reason: CreditReason): Promise<{ balance: number }>;
+  setPlan(plan: Plan): Promise<void>;
+}
+
+export class CreditMeter implements CreditMeterHandle {
   private balance: number;
   private plan: Plan;
   private reserved = new Map<string, number>();
@@ -46,7 +62,6 @@ class CreditMeter {
   /** Queue `fn` so it runs after all previously-queued operations finish. */
   private serialize<T>(fn: () => T | Promise<T>): Promise<T> {
     const run = this.tail.then(fn, fn);
-    // Keep the chain alive even if an op throws.
     this.tail = run.then(
       () => undefined,
       () => undefined
@@ -69,7 +84,6 @@ class CreditMeter {
     return this.active.size;
   }
 
-  /** Sum of credits currently held by in-flight reservations. */
   private reservedTotal(): number {
     let sum = 0;
     for (const v of this.reserved.values()) sum += v;
@@ -115,8 +129,12 @@ class CreditMeter {
    * Finalize a generation: debit the actual cost, release the slot, and append
    * a row to the durable ledger in the user's D1 shard. Idempotent.
    */
-  settle(generationId: string, actual: number, refVersionId?: string | null): Promise<{ debited: number; balance: number }> {
-    return this.serialize(() => {
+  settle(
+    generationId: string,
+    actual: number,
+    refVersionId?: string | null
+  ): Promise<{ debited: number; balance: number }> {
+    return this.serialize(async () => {
       if (this.applied.get(generationId) === "settled") {
         return { debited: 0, balance: this.balance };
       }
@@ -125,10 +143,9 @@ class CreditMeter {
       this.applied.set(generationId, "settled");
       const debited = Math.max(0, Math.round(actual));
       this.balance = Math.max(0, this.balance - debited);
-      // Persist live balance + durable ledger row.
-      users.setBalance(this.clerkUserId, this.balance);
+      await users.setBalance(this.clerkUserId, this.balance);
       if (debited > 0) {
-        transactions.add(this.clerkUserId, {
+        await transactions.add(this.clerkUserId, {
           userId: this.userId,
           delta: -debited,
           reason: "generation",
@@ -141,10 +158,8 @@ class CreditMeter {
   }
 
   /**
-   * Abort path: release the reservation and slot without debiting. Returns the
-   * number of reserved credits that were freed (reported to the client). The
-   * balance was never reduced at reserve time, so no ledger write is needed.
-   * Idempotent.
+   * Abort path: release the reservation and slot without debiting. The balance
+   * was never reduced at reserve time, so no ledger write is needed. Idempotent.
    */
   refund(generationId: string): Promise<{ refunded: number }> {
     return this.serialize(() => {
@@ -160,35 +175,24 @@ class CreditMeter {
 
   /** Grant credits (signup grant, monthly refill, purchase). Writes ledger. */
   grant(amount: number, reason: CreditReason): Promise<{ balance: number }> {
-    return this.serialize(() => {
+    return this.serialize(async () => {
       this.balance += Math.max(0, Math.round(amount));
-      users.setBalance(this.clerkUserId, this.balance);
-      transactions.add(this.clerkUserId, { userId: this.userId, delta: amount, reason });
+      await users.setBalance(this.clerkUserId, this.balance);
+      await transactions.add(this.clerkUserId, { userId: this.userId, delta: amount, reason });
       log.info("credit.grant", { userId: this.userId, amount, reason, balance: this.balance });
       return { balance: this.balance };
     });
   }
 }
 
-// ---- Registry: one meter per user, created lazily from D1 ----------------
-
-const meters = new Map<string, CreditMeter>();
-
-/** Get (or hydrate) the CreditMeter for a user. Throws if the user is unknown. */
-export function getCreditMeter(clerkUserId: string): CreditMeter {
-  let meter = meters.get(clerkUserId);
-  if (!meter) {
-    const user = users.getByClerkId(clerkUserId);
-    if (!user) throw new Error(`No user for clerkUserId=${clerkUserId}`);
-    meter = new CreditMeter(clerkUserId, user.id, user.creditsBalance, user.plan);
-    meters.set(clerkUserId, meter);
-  }
-  return meter;
+/** Construct a freshly-hydrated meter from the user's durable row in D1. */
+export async function hydrateCreditMeter(clerkUserId: string): Promise<CreditMeter> {
+  const user = await users.getByClerkId(clerkUserId);
+  if (!user) throw new Error(`No user for clerkUserId=${clerkUserId}`);
+  return new CreditMeter(clerkUserId, user.id, user.creditsBalance, user.plan);
 }
 
-/** Drop a cached meter (e.g. after plan change via webhook) so it re-hydrates. */
-export function resetCreditMeter(clerkUserId: string): void {
-  meters.delete(clerkUserId);
+/** Get (or hydrate) the CreditMeter handle for a user, via the active backend. */
+export function getCreditMeter(clerkUserId: string): Promise<CreditMeterHandle> {
+  return getBackend().creditMeter(clerkUserId);
 }
-
-export type { CreditMeter };

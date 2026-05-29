@@ -60,15 +60,34 @@ and billing (`/api/credits`, `/api/billing/*`). Layers:
 - `adapters/*` — the Cloudflare stand-ins (see below).
 - `ai/*` — provider abstraction + generation parsing.
 
-### Adapters (the Cloudflare mapping)
-| Adapter | Local impl | Stands in for | Notes |
+### Dual-runtime backend (Node ↔ Cloudflare)
+The storage layer is **runtime-agnostic**, selected at startup by a `Backend`
+installed via `adapters/runtime.ts` (`setBackend`/`getBackend`). Two entrypoints:
+`index.ts` installs the Node backend then serves on `@hono/node-server`;
+`worker.ts` installs the Cloudflare backend, serves the same `app`, adds a Queue
+consumer, and re-exports the `CreditMeterDO`. `app.ts` builds the Hono app and is
+**side-effect free** (no backend install, no server) so both entrypoints import it.
+
+The SQL surface (`adapters/sql.ts`) **is D1's** (`prepare(sql).bind(...).first()/.all()/.run()`,
+all async), so `db/repo.ts` is written once and runs on both runtimes. **Everything
+in the data path is async** — adding a repo/r2/kv call means `await`ing it.
+
+| Concern | Node impl (`adapters/node/*`) | Cloudflare impl (`adapters/cf/*`) | Notes |
 |---|---|---|---|
-| `d1.ts` | sharded `better-sqlite3` | D1 | Shards by `hash(clerkUserId) % D1_SHARD_COUNT` (default 4) so all of a user's rows live in one shard — preserves transactional integrity. |
-| `r2.ts` | filesystem (`DATA_DIR`) | R2 | File blobs + manifests + zips; key layout matches PRD §11.3. |
-| `kv.ts` | in-memory TTL map | KV | Prompt dedup + rate limiting. |
-| `edge-cache.ts` | in-memory SWR | Workers Cache API | HIT/STALE/MISS, `invalidatePrefix`. |
-| `credit-meter.ts` | per-user in-process object | `CreditMeter` Durable Object | Operations **serialized** with an async mutex and **idempotent on `generationId`** — the guarantees a real DO gives against double-debit/overspend. Concurrency slots: Free 1 / Pro 3. |
-| `services/queue.ts` | async in-process | Queues | Thumbnail + pre-build-zip jobs. |
+| SQL/D1 | sharded `better-sqlite3` behind async D1 facade | D1 bindings `DB_0..DB_3` | Shards by `hash(clerkUserId) % SHARD_COUNT` (default 4) — a user's rows live in one shard. |
+| R2 | filesystem (`DATA_DIR`) | R2 bucket binding | Key layout matches PRD §11.3 (`r2keys`). |
+| KV | in-memory TTL map | KV namespace (TTL ≥60s clamp) | Prompt dedup (`kv`/`kvKeys`). |
+| CreditMeter | in-process `CreditMeter` registry | `CreditMeterDO` Durable Object **reusing the same `CreditMeter` class** | Ops **serialized** (async mutex) + **idempotent on `generationId`**; slots Free 1 / Pro 3. |
+| Queue | in-process drain (`dispatchJob`) | Queue binding + `worker.ts` consumer | Both call `processQueueJob`. Thumbnail + zip-prebuild. |
+| `edge-cache.ts` | in-isolate SWR Map (both runtimes) | same | HIT/STALE/MISS, `invalidatePrefix`. |
+
+**Native modules stay out of the edge bundle:** only `adapters/node/*` import
+better-sqlite3/fs, and only `index.ts`/`seed.ts` import the Node backend. The
+Worker bundle (`worker.ts` → `adapters/cf/*`) never pulls them in.
+
+Cloudflare deploy lives in `apps/api`: `wrangler.toml` (bindings), `migrations/`
+(D1 schema, mirrors `db/schema.ts`), scripts `cf:dev`/`cf:deploy`/`cf:migrate`.
+The api `tsconfig.json` carries both `node` + `@cloudflare/workers-types`.
 
 ### Generation flow (`services/generation.ts`, mirrors PRD §7.3)
 validate model + plan → check KV **dedup** cache (cache hit returns `done` with `fromCache:true`, **no
