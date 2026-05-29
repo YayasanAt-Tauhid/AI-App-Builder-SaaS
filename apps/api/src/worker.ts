@@ -26,7 +26,9 @@ export { CreditMeterDO } from "./adapters/cf/credit-meter-do.js";
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     setBackend(createCfBackend(env));
-    return app.fetch(request, env as unknown as Record<string, unknown>, ctx);
+    // Hono's fetch uses its own ExecutionContext type; the Workers one is
+    // structurally compatible for our use, so cast at the boundary.
+    return app.fetch(request, env as unknown as Record<string, unknown>, ctx as never);
   },
 
   async queue(batch: MessageBatch<QueueJob>, env: Env): Promise<void> {
