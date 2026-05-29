@@ -1,18 +1,31 @@
 /**
  * auth.ts — Client auth handle (PRD §14).
  *
- * The API supports two modes: real Clerk JWTs and a dev fallback keyed by an
- * `x-dev-user` header. This client runs in dev mode by default so the app works
- * with zero auth setup: it keeps a stable per-browser dev user id in
- * localStorage and attaches it as `x-dev-user` on every request.
+ * Two modes, chosen by whether a Clerk publishable key is configured:
  *
- * To enable Clerk on the client: install @clerk/nextjs, wrap the app in
- * <ClerkProvider>, and change `authHeaders()` to attach
- * `Authorization: Bearer ${await getToken()}` instead of the dev header. The
- * API already verifies real Clerk tokens, so no backend change is needed.
+ * - **Clerk mode** (NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY set): every request carries
+ *   `Authorization: Bearer <jwt>`. The token comes from Clerk's `getToken()`,
+ *   which is async, so a small client bridge (ClerkTokenBridge) registers a
+ *   getter here once the Clerk session is available.
+ * - **Dev mode** (no key): the app works with zero auth setup by keeping a stable
+ *   per-browser dev user id in localStorage and sending it as `x-dev-user`.
+ *
+ * The API already verifies real Clerk tokens *and* honours the dev header, so
+ * no backend change is needed to switch between the two.
  */
 
 const DEV_USER_KEY = "aiab_dev_user";
+
+/** True when a Clerk publishable key is configured (build-time, public env). */
+export function isClerkEnabled(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+}
+
+/** Registered by ClerkTokenBridge so non-React modules can fetch a fresh JWT. */
+let clerkTokenGetter: (() => Promise<string | null>) | null = null;
+export function setClerkTokenGetter(getter: (() => Promise<string | null>) | null): void {
+  clerkTokenGetter = getter;
+}
 
 /** Get (or lazily create) this browser's dev user id. */
 export function getDevUser(): string {
@@ -25,8 +38,15 @@ export function getDevUser(): string {
   return id;
 }
 
-/** Headers to attach to every API request to identify the user. */
-export function authHeaders(): Record<string, string> {
+/**
+ * Headers to attach to every API request to identify the user. Async because
+ * Clerk's token retrieval is async; in dev mode it resolves synchronously.
+ */
+export async function authHeaders(): Promise<Record<string, string>> {
   if (typeof window === "undefined") return {};
+  if (isClerkEnabled() && clerkTokenGetter) {
+    const token = await clerkTokenGetter();
+    if (token) return { Authorization: `Bearer ${token}` };
+  }
   return { "x-dev-user": getDevUser() };
 }

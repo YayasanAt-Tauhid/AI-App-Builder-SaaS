@@ -9,6 +9,10 @@
  * in both themes.
  */
 @import "tailwindcss";
+/* Animation utilities (animate-in/fade-in/zoom-in) used by the Radix-based
+ * ShadCN overlays — dialog, dropdown, tooltip. Tailwind v4 replacement for
+ * the old `tailwindcss-animate` plugin. */
+@import "tw-animate-css";
 
 /* Dark theme (default). */
 :root {
@@ -58,6 +62,26 @@
   --color-danger: var(--danger);
   --color-success: var(--success);
   --radius: 0.625rem;
+
+  /* ---- Canonical ShadCN/UI token aliases (PRD §8.1). ----
+   * These map onto the palette above so the Radix-based ui/* primitives use
+   * standard ShadCN class names (bg-card, border-input, ring-ring, …) while the
+   * rest of the app keeps its existing semantic utilities. */
+  --color-background: var(--bg);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: #ffffff;
+  --color-input: var(--border);
+  --color-ring: var(--primary);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
 }
 
 * {

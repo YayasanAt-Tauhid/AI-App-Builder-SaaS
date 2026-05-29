@@ -26,7 +26,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders(),
+      ...(await authHeaders()),
       ...(init.headers ?? {}),
     },
   });
@@ -96,7 +96,7 @@ export const swrFetcher = <T>(path: string): Promise<T> => request<T>(path);
  * so we fetch with headers and hand back a Blob for the caller to save.
  */
 export async function downloadExportBlob(downloadUrl: string): Promise<Blob> {
-  const res = await fetch(`${API_BASE}${downloadUrl}`, { headers: { ...authHeaders() } });
+  const res = await fetch(`${API_BASE}${downloadUrl}`, { headers: { ...(await authHeaders()) } });
   if (!res.ok) throw new Error("Export download failed");
   return res.blob();
 }
@@ -139,7 +139,7 @@ export function streamGenerate(body: GenerateBody, handlers: GenerateHandlers, s
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...authHeaders(),
+          ...(await authHeaders()),
           ...(skipDedup ? { "X-Skip-Dedup": "true" } : {}),
         },
         body: JSON.stringify(body),
@@ -202,14 +202,15 @@ export function streamGenerate(body: GenerateBody, handlers: GenerateHandlers, s
 
   // When aborted locally, also notify the server so it can refund/release.
   controller.signal.addEventListener("abort", () => {
-    if (generationId) {
+    if (!generationId) return;
+    void (async () => {
       fetch(`${API_BASE}/api/generate/abort`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({ generationId }),
         keepalive: true,
       }).catch(() => {});
-    }
+    })();
   });
 
   return controller;

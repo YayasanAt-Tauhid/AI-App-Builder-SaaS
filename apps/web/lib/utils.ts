@@ -1,8 +1,14 @@
 /** utils.ts — tiny helpers shared across components. */
 
-/** Join class names, dropping falsy values. A minimal `clsx`. */
-export function cn(...parts: Array<string | false | null | undefined>): string {
-  return parts.filter(Boolean).join(" ");
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+/**
+ * Merge class names the ShadCN way: clsx resolves conditionals/arrays, then
+ * tailwind-merge dedupes conflicting Tailwind utilities (e.g. `px-2 px-4` → `px-4`).
+ */
+export function cn(...inputs: ClassValue[]): string {
+  return twMerge(clsx(inputs));
 }
 
 /** Human-friendly relative time, e.g. "3m ago". */

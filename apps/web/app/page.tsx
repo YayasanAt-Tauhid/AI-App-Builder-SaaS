@@ -5,7 +5,7 @@
  * and funnels into the dashboard via "Start Building". Server component — no
  * client JS needed for the static pitch.
  */
-import Link from "next/link";
+import { LandingCta } from "@/components/landing-cta";
 
 const FEATURES = [
   { title: "Live preview", body: "See your app run instantly in an in-browser Sandpack sandbox — no setup." },
@@ -33,18 +33,7 @@ export default function Landing() {
       </p>
 
       <div className="mt-8 flex flex-wrap gap-3">
-        <Link
-          href="/dashboard"
-          className="inline-flex h-12 items-center rounded-[var(--radius)] bg-primary px-7 font-medium text-primary-foreground transition hover:bg-primary-hover"
-        >
-          Start Building →
-        </Link>
-        <Link
-          href="/dashboard"
-          className="inline-flex h-12 items-center rounded-[var(--radius)] border border-border px-7 font-medium hover:bg-surface2"
-        >
-          View Dashboard
-        </Link>
+        <LandingCta />
       </div>
 
       <div className="mt-20 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
