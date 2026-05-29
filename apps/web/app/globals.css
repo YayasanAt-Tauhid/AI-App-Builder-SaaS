@@ -1,0 +1,95 @@
+/**
+ * globals.css — Tailwind v4 entry + dark-first design tokens (PRD §6.11).
+ *
+ * We define semantic colors as CSS variables on :root (dark by default) and on
+ * .light (the light-theme toggle), then register them with @theme so they're
+ * usable as Tailwind utilities (bg-surface, text-muted, border-border, ...).
+ * Because the utilities resolve to var(), flipping the .light class on <html>
+ * re-themes the whole app at runtime with no rebuild. WCAG AA contrast targeted
+ * in both themes.
+ */
+@import "tailwindcss";
+
+/* Dark theme (default). */
+:root {
+  --bg: #0b0f17;
+  --surface: #121826;
+  --surface-2: #0f1420;
+  --border: #232b39;
+  --foreground: #e6edf3;
+  --muted: #8b98a9;
+  --primary: #6d5efc;
+  --primary-hover: #5a4ce0;
+  --primary-foreground: #ffffff;
+  --accent: #22d3ee;
+  --danger: #f87171;
+  --success: #4ade80;
+  color-scheme: dark;
+}
+
+/* Light theme (toggled by adding .light to <html>). */
+.light {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --border: #dfe3ea;
+  --foreground: #0b0f17;
+  --muted: #5b6573;
+  --primary: #5a4ce0;
+  --primary-hover: #4a3ed0;
+  --primary-foreground: #ffffff;
+  --accent: #0891b2;
+  --danger: #dc2626;
+  --success: #16a34a;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface-2);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --radius: 0.625rem;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--foreground);
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* Thin, theme-aware scrollbars for the editor/preview panes. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

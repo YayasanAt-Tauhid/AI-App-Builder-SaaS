@@ -1,0 +1,30 @@
+{
+  "name": "@aiab/web",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Next.js client for AI App Builder — dashboard, generation/streaming, Sandpack preview, Monaco editor, version history, billing.",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@aiab/shared": "workspace:*",
+    "@codesandbox/sandpack-react": "^2.19.10",
+    "@monaco-editor/react": "^4.7.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "swr": "^2.3.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.5",
+    "@types/node": "^22.13.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.1.5",
+    "typescript": "^5.7.3"
+  }
+}
