@@ -11,18 +11,17 @@ import type { ModelInfo, Plan, PlanLimits } from "./types";
 
 /** OpenRouter model id untuk setiap catalog id. */
 export const PROVIDER_MODEL_IDS: Record<string, string> = {
-  // Semua ":free" ($0). Dipilih model yang STREAMING cepat & bukan reasoning
-  // model (yang "berpikir" diam lalu keluar sekaligus -> UI tampak 0 tokens).
-  // Llama 3.3 70B & Qwen3 Coder paling responsif untuk coding gratis.
-  // Cost guard di provider.ts menolak model non-":free".
-  "claude-opus":       "qwen/qwen3-coder:free",
-  "claude-sonnet":     "meta-llama/llama-3.3-70b-instruct:free",
-  "claude-haiku":      "meta-llama/llama-3.3-70b-instruct:free",
-  "gpt-4o":            "qwen/qwen3-coder:free",
-  "gpt-4o-mini":       "meta-llama/llama-3.3-70b-instruct:free",
-  "gemini-1.5-pro":    "qwen/qwen3-coder:free",
-  "gemini-1.5-flash":  "meta-llama/llama-3.3-70b-instruct:free",
-  "deepseek-coder":    "qwen/qwen3-coder:free",
+  // Semua dipetakan ke deepseek/deepseek-v4-flash (BERBAYAR, ~$0.1-0.2/M token,
+  // cepat & andal). Model ini di-allowlist khusus di provider.ts agar cost guard
+  // mengizinkannya sementara model berbayar lain tetap diblokir.
+  "claude-opus":       "deepseek/deepseek-v4-flash",
+  "claude-sonnet":     "deepseek/deepseek-v4-flash",
+  "claude-haiku":      "deepseek/deepseek-v4-flash",
+  "gpt-4o":            "deepseek/deepseek-v4-flash",
+  "gpt-4o-mini":       "deepseek/deepseek-v4-flash",
+  "gemini-1.5-pro":    "deepseek/deepseek-v4-flash",
+  "gemini-1.5-flash":  "deepseek/deepseek-v4-flash",
+  "deepseek-coder":    "deepseek/deepseek-v4-flash",
 };
 
 export const MODEL_CATALOG: ModelInfo[] = [

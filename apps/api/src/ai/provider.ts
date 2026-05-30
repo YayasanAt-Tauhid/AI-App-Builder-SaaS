@@ -43,11 +43,16 @@ export function getProvider(modelId: string): { provider: ModelProvider; provide
     return { provider: new MockProvider(), providerModelId, engine: "mock" };
   }
 
-  // Cost guard: only allow OpenRouter ":free" ($0) models. If a mapping is
-  // missing or points at a paid model, fall back to the mock instead of
-  // silently spending the OpenRouter balance. Set ALLOW_PAID_MODELS=1 to lift.
+  // Cost guard: allow ":free" ($0) models, plus an explicit allowlist of cheap
+  // paid models we've opted into. Anything else falls back to the mock instead
+  // of silently spending the OpenRouter balance. ALLOW_PAID_MODELS=1 lifts it.
+  const PAID_ALLOWLIST = new Set<string>([
+    "deepseek/deepseek-v4-flash", // ~$0.1-0.2/M tokens, fast & reliable
+  ]);
   const allowPaid = process.env.ALLOW_PAID_MODELS === "1";
-  if (!allowPaid && !providerModelId.endsWith(":free")) {
+  const permitted =
+    providerModelId.endsWith(":free") || PAID_ALLOWLIST.has(providerModelId);
+  if (!allowPaid && !permitted) {
     log.warn("provider.blocked_paid_model", { modelId, providerModelId });
     return { provider: new MockProvider(), providerModelId, engine: "mock" };
   }
