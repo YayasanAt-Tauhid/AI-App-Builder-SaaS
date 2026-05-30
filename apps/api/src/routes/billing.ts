@@ -19,7 +19,7 @@ import { transactions, users } from "../db/repo.js";
 import { applyPlanChange } from "../services/provisioning.js";
 import { env } from "../env.js";
 import { analytics } from "../util/logger.js";
-import { createCheckoutSession, createPortalSession } from "../services/stripe.js";
+import { createCheckoutSession, createPortalSession } from "../services/midtrans.js";
 
 export const billingRoute = new Hono<{ Variables: { auth: AuthContext } }>();
 

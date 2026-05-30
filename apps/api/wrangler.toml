@@ -31,25 +31,25 @@ WEB_ORIGIN = "http://localhost:3000"
 [[d1_databases]]
 binding = "DB_0"
 database_name = "aiab-shard-0"
-database_id = "REPLACE_WITH_SHARD_0_ID"
+database_id = "05bc979b-da6d-4cdd-9884-39a7273536f1"
 migrations_dir = "migrations"
 
 [[d1_databases]]
 binding = "DB_1"
 database_name = "aiab-shard-1"
-database_id = "REPLACE_WITH_SHARD_1_ID"
+database_id = "960b94db-c333-4c62-8510-5076b9157fd9"
 migrations_dir = "migrations"
 
 [[d1_databases]]
 binding = "DB_2"
 database_name = "aiab-shard-2"
-database_id = "REPLACE_WITH_SHARD_2_ID"
+database_id = "238f2a90-b52c-41f0-9955-b6bd630ef461"
 migrations_dir = "migrations"
 
 [[d1_databases]]
 binding = "DB_3"
 database_name = "aiab-shard-3"
-database_id = "REPLACE_WITH_SHARD_3_ID"
+database_id = "4d02d736-6a08-47eb-ae98-008cef7f3dd6"
 migrations_dir = "migrations"
 
 # --- R2: project blobs, manifests, export zips, thumbnails (PRD §11.3).
@@ -60,7 +60,7 @@ bucket_name = "aiab-blobs"
 # --- KV: prompt dedup + soft rate limits (PRD §11.2).
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "e43d80a670d9494f9fd791ffcf636ca4"
 
 # --- Queues: thumbnail render + zip pre-build, off the request path (PRD §6.8).
 [[queues.producers]]

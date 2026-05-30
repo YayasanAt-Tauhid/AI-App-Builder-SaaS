@@ -1,29 +1,24 @@
 /**
- * models.ts — The AI model catalog (PRD Section 9.1).
+ * models.ts — AI model catalog (PRD §9.1).
  *
- * Eight models across four providers. This catalog is the single source of
- * truth the API serves at GET /api/models (edge-cached, TTL 5 min) and that
- * the client renders in the model picker. Exact provider model IDs are kept
- * here so the catalog can be updated server-side without client changes.
+ * Semua model dirutekan melalui OpenRouter (satu API key) sehingga tidak perlu
+ * key terpisah per provider. PROVIDER_MODEL_IDS memetakan catalog id ke
+ * OpenRouter model string. Provider field tetap menunjukkan pemilik asli model
+ * (untuk UI/gating), tapi actual request semua lewat openrouter.
  */
 
 import type { ModelInfo, Plan, PlanLimits } from "./types";
 
-/**
- * The provider-specific model id used when calling each provider's API.
- * Separated from the catalog `id` (a stable public handle) so we can swap the
- * underlying version without breaking saved projects. We default Claude flows
- * to the latest, most capable models per the PRD guidance.
- */
+/** OpenRouter model id untuk setiap catalog id. */
 export const PROVIDER_MODEL_IDS: Record<string, string> = {
-  "claude-opus": "claude-opus-4-8",
-  "claude-sonnet": "claude-sonnet-4-6",
-  "claude-haiku": "claude-haiku-4-5-20251001",
-  "gpt-4o": "gpt-4o",
-  "gpt-4o-mini": "gpt-4o-mini",
-  "gemini-1.5-pro": "gemini-1.5-pro",
-  "gemini-1.5-flash": "gemini-1.5-flash",
-  "deepseek-coder": "deepseek-chat",
+  "claude-opus":       "anthropic/claude-opus-4",
+  "claude-sonnet":     "anthropic/claude-sonnet-4-5",
+  "claude-haiku":      "anthropic/claude-haiku-4-5",
+  "gpt-4o":            "openai/gpt-4o",
+  "gpt-4o-mini":       "openai/gpt-4o-mini",
+  "gemini-1.5-pro":    "google/gemini-pro-1.5",
+  "gemini-1.5-flash":  "google/gemini-flash-1.5",
+  "deepseek-coder":    "deepseek/deepseek-chat",
 };
 
 export const MODEL_CATALOG: ModelInfo[] = [
@@ -42,7 +37,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
     name: "Claude Sonnet",
     provider: "anthropic",
     tier: "free+pro",
-    isDefault: true, // PRD default: balanced quality/speed
+    isDefault: true,
     strength: "Balanced quality/speed",
     relativeCost: "medium",
     creditsPer1kTokens: 3,
@@ -109,28 +104,19 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
 ];
 
-/** Look up a model by its catalog id. */
 export function getModel(id: string): ModelInfo | undefined {
   return MODEL_CATALOG.find((m) => m.id === id);
 }
 
-/** The default model handed to new sessions. */
 export function getDefaultModel(): ModelInfo {
   return MODEL_CATALOG.find((m) => m.isDefault) ?? MODEL_CATALOG[1];
 }
 
-/** Whether a plan may use a given model (PRD Section 13.2 model gating). */
 export function planCanUseModel(plan: Plan, model: ModelInfo): boolean {
-  if (plan === "pro") return true; // Pro: all 8 models
-  // Free: any model whose tier includes free.
+  if (plan === "pro") return true;
   return model.tier === "free" || model.tier === "free+pro";
 }
 
-/**
- * Enforce per-plan project scope caps (PRD Open Question 5 resolution):
- * file count + total source bytes. Returns an error message if the manifest
- * exceeds the plan's caps, or null if it's within limits.
- */
 export function manifestPlanCheck(fileCount: number, byteCount: number, limits: PlanLimits): string | null {
   if (fileCount > limits.maxFiles) {
     return `Project exceeds the ${limits.maxFiles}-file limit for your plan (${fileCount} files). Upgrade for larger projects.`;
@@ -142,13 +128,12 @@ export function manifestPlanCheck(fileCount: number, byteCount: number, limits: 
   return null;
 }
 
-/** Per-plan limits (PRD Section 13.2 + Open Question 5 resolution). */
 export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
   free: {
     monthlyCredits: 200,
     concurrency: 1,
     maxFiles: 30,
-    maxBytes: 2 * 1024 * 1024, // 2 MB
+    maxBytes: 2 * 1024 * 1024,
     models: "free-tier",
     watermark: true,
   },
@@ -156,7 +141,7 @@ export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     monthlyCredits: 5000,
     concurrency: 3,
     maxFiles: 200,
-    maxBytes: 25 * 1024 * 1024, // 25 MB
+    maxBytes: 25 * 1024 * 1024,
     models: "all",
     watermark: false,
   },

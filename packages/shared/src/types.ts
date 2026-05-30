@@ -99,7 +99,7 @@ export interface CreditTransaction {
 export interface ModelInfo {
   id: string;
   name: string;
-  provider: "anthropic" | "openai" | "google" | "deepseek";
+  provider: "anthropic" | "openai" | "google" | "deepseek" | "openrouter";
   tier: Plan | "free+pro";
   isDefault: boolean;
   strength: string;

@@ -1,11 +1,10 @@
 /**
- * webhooks.ts — Clerk + Stripe webhooks (PRD §6.9, §12.6, §14).
+ * webhooks.ts — Clerk + Midtrans webhooks (PRD §6.9, §12.6, §14).
  *
- * These run WITHOUT a JWT but ARE signature-verified (PRD §16): Clerk uses
- * Svix-style HMAC headers, Stripe uses its own HMAC scheme. When the relevant
- * signing secret isn't configured (dev/mock), we skip verification so the app
- * still works, but we log it. Handlers keep the local D1 user/subscription
- * records and the CreditMeter in sync with the identity/billing providers.
+ * Berjalan TANPA JWT tapi diverifikasi signature. Clerk pakai Svix-style HMAC,
+ * Midtrans pakai SHA512 signature_key. Tanpa secret dikonfigurasi (dev/mock),
+ * verifikasi di-skip supaya app tetap bisa jalan. Handler menjaga D1 dan
+ * CreditMeter tetap sinkron dengan Clerk dan Midtrans.
  */
 
 import { Hono } from "hono";
@@ -19,7 +18,7 @@ import { log } from "../util/logger.js";
 
 export const webhooksRoute = new Hono();
 
-// ---- Clerk: user lifecycle ----------------------------------------------
+// ---- Clerk: user lifecycle -----------------------------------------------
 webhooksRoute.post("/clerk", async (c) => {
   const raw = await c.req.text();
   if (!verifyClerk(c, raw)) return c.json({ error: "invalid_signature" }, 401);
@@ -37,7 +36,6 @@ webhooksRoute.post("/clerk", async (c) => {
       await ensureUser(clerkUserId, email);
       break;
     case "user.updated":
-      // Profile sync — nothing security-relevant to change locally for now.
       break;
     case "user.deleted":
       await users.softDelete(clerkUserId);
@@ -48,92 +46,92 @@ webhooksRoute.post("/clerk", async (c) => {
   return c.json({ received: true });
 });
 
-// ---- Stripe: subscription + payment events ------------------------------
-webhooksRoute.post("/stripe", async (c) => {
-  const raw = await c.req.text();
-  if (!verifyStripe(c, raw)) return c.json({ error: "invalid_signature" }, 401);
+// ---- Midtrans: payment notification --------------------------------------
+webhooksRoute.post("/midtrans", async (c) => {
+  const body = await c.req.json<any>().catch(() => null);
+  if (!body) return c.json({ error: "bad_payload" }, 400);
 
-  const evt = safeJson(raw);
-  if (!evt) return c.json({ error: "bad_payload" }, 400);
-  const obj = evt.data?.object ?? {};
-  const clerkUserId: string | undefined = obj.client_reference_id ?? obj.metadata?.clerkUserId;
+  const { order_id, status_code, gross_amount, signature_key, transaction_status, fraud_status } = body;
 
-  switch (evt.type) {
-    case "checkout.session.completed":
-    case "customer.subscription.updated":
-    case "invoice.paid": {
-      if (clerkUserId && (await users.getByClerkId(clerkUserId))) {
-        await applyPlanChange(clerkUserId, "pro", PLAN_LIMITS.pro.monthlyCredits);
-        const u = (await users.getByClerkId(clerkUserId))!;
-        await subscriptions.upsert(clerkUserId, {
-          userId: u.id,
-          stripeSubscriptionId: obj.subscription ?? obj.id,
-          plan: "pro",
-          status: "active",
-          currentPeriodEnd: obj.current_period_end
-            ? new Date(obj.current_period_end * 1000).toISOString()
-            : undefined,
-        });
-      }
-      break;
-    }
-    case "customer.subscription.deleted": {
-      if (clerkUserId && (await users.getByClerkId(clerkUserId))) {
-        await applyPlanChange(clerkUserId, "free");
-      }
-      break;
-    }
-    default:
-      log.info("webhook.stripe.ignored", { type: evt.type });
+  // Verifikasi signature Midtrans: SHA512(order_id + status_code + gross_amount + server_key)
+  if (!verifyMidtransSignature(order_id, status_code, gross_amount, signature_key)) {
+    return c.json({ error: "invalid_signature" }, 401);
   }
+
+  // clerkUserId disimpan di custom_field1 saat buat transaksi
+  const clerkUserId: string | undefined = body.custom_field1;
+  if (!clerkUserId) return c.json({ received: true });
+
+  const isSuccess =
+    (transaction_status === "capture" && fraud_status === "accept") ||
+    transaction_status === "settlement";
+
+  if (isSuccess) {
+    await applyPlanChange(clerkUserId, "pro", PLAN_LIMITS.pro.monthlyCredits);
+    const u = await users.getByClerkId(clerkUserId);
+    if (u) {
+      await subscriptions.upsert(clerkUserId, {
+        userId: u.id,
+        stripeSubscriptionId: order_id, // pakai order_id sebagai ref
+        plan: "pro",
+        status: "active",
+        currentPeriodEnd: undefined,
+      });
+    }
+    log.info("midtrans.webhook.pro_activated", { clerkUserId, order_id });
+  }
+
   return c.json({ received: true });
 });
 
-// ---- Signature verification helpers -------------------------------------
+// ---- Helpers ----------------------------------------------------------------
 
 function verifyClerk(c: any, raw: string): boolean {
   if (!env.clerkWebhookSecret) {
     log.warn("webhook.clerk.unverified", { reason: "no secret configured" });
-    return true; // dev/mock: accept
+    return true; // dev mode
   }
-  const id = c.req.header("svix-id");
-  const ts = c.req.header("svix-timestamp");
-  const sigHeader = c.req.header("svix-signature");
-  if (!id || !ts || !sigHeader) return false;
-  const secret = Buffer.from(env.clerkWebhookSecret.replace(/^whsec_/, ""), "base64");
-  const expected = createHmac("sha256", secret).update(`${id}.${ts}.${raw}`).digest("base64");
-  // The header may contain multiple space-separated "v1,<sig>" pairs.
-  return sigHeader
-    .split(" ")
-    .map((p: string) => p.split(",")[1])
-    .some((sig: string) => safeEqual(sig, expected));
+  // Svix signature verification
+  const svixId        = c.req.header("svix-id") ?? "";
+  const svixTimestamp = c.req.header("svix-timestamp") ?? "";
+  const svixSig       = c.req.header("svix-signature") ?? "";
+  const toSign = `${svixId}.${svixTimestamp}.${raw}`;
+  const secret = env.clerkWebhookSecret.replace(/^whsec_/, "");
+  const key = Buffer.from(secret, "base64");
+  const expected = createHmac("sha256", key).update(toSign).digest("base64");
+  const signatures: string[] = svixSig.split(" ").map((s: string) => s.replace(/^v1,/, ""));
+  return signatures.some((sig: string) => {
+    try {
+      return timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
+    } catch {
+      return false;
+    }
+  });
 }
 
-function verifyStripe(c: any, raw: string): boolean {
-  if (!env.stripeWebhookSecret) {
-    log.warn("webhook.stripe.unverified", { reason: "no secret configured" });
-    return true; // dev/mock: accept
+function verifyMidtransSignature(
+  orderId: string,
+  statusCode: string,
+  grossAmount: string,
+  signatureKey: string,
+): boolean {
+  if (!env.midtransServerKey) {
+    log.warn("midtrans.webhook.unverified", { reason: "no server key" });
+    return true; // dev mode
   }
-  const header = c.req.header("stripe-signature") ?? "";
-  const parts = Object.fromEntries(header.split(",").map((kv: string) => kv.split("=")));
-  if (!parts.t || !parts.v1) return false;
-  const expected = createHmac("sha256", env.stripeWebhookSecret)
-    .update(`${parts.t}.${raw}`)
+  // Midtrans signature = SHA512(order_id + status_code + gross_amount + server_key)
+  // Midtrans menggunakan SHA512 plain hash (bukan HMAC)
+  const { createHash } = require("node:crypto");
+  const hash: string = createHash("sha512")
+    .update(`${orderId}${statusCode}${grossAmount}${env.midtransServerKey}`)
     .digest("hex");
-  return safeEqual(parts.v1, expected);
-}
-
-function safeEqual(a: string | undefined, b: string): boolean {
-  if (!a) return false;
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ba.length === bb.length && timingSafeEqual(ba, bb);
+  try {
+    return timingSafeEqual(Buffer.from(hash), Buffer.from(signatureKey));
+  } catch {
+    return false;
+  }
 }
 
 function safeJson(s: string): any | null {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(s); } catch { return null; }
 }
