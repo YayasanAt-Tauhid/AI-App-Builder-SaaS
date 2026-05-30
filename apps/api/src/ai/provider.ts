@@ -43,6 +43,15 @@ export function getProvider(modelId: string): { provider: ModelProvider; provide
     return { provider: new MockProvider(), providerModelId, engine: "mock" };
   }
 
+  // Cost guard: only allow OpenRouter ":free" ($0) models. If a mapping is
+  // missing or points at a paid model, fall back to the mock instead of
+  // silently spending the OpenRouter balance. Set ALLOW_PAID_MODELS=1 to lift.
+  const allowPaid = process.env.ALLOW_PAID_MODELS === "1";
+  if (!allowPaid && !providerModelId.endsWith(":free")) {
+    log.warn("provider.blocked_paid_model", { modelId, providerModelId });
+    return { provider: new MockProvider(), providerModelId, engine: "mock" };
+  }
+
   return {
     provider: new OpenRouterProvider(env.openrouterApiKey, providerModelId),
     providerModelId,
