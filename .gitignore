@@ -38,3 +38,7 @@ coverage/
 
 # Vercel build artifacts
 .vercel
+
+# OpenNext build output
+.open-next
+.wrangler

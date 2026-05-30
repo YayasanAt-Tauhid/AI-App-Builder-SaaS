@@ -1,10 +1,9 @@
 /**
  * projects/[id]/page.tsx — Builder workspace.
- * Edge runtime + fully client-side rendering untuk kompatibilitas Cloudflare Pages.
+ * Fully client-side rendering. Runs on Cloudflare Workers via OpenNext
+ * (no `runtime = "edge"` — OpenNext serves the app from a nodejs_compat Worker).
  */
 "use client";
-
-export const runtime = "edge";
 
 import { use } from "react";
 import { Nav } from "@/components/nav";
