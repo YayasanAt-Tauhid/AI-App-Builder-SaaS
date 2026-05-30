@@ -25,7 +25,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 SHARD_COUNT = "4"
-WEB_ORIGIN = "http://localhost:3000"
+WEB_ORIGIN = "https://aiab-web.pages.dev"
 
 # --- D1: one database per shard (PRD §8.4). shard = hash(user_id) % SHARD_COUNT.
 [[d1_databases]]

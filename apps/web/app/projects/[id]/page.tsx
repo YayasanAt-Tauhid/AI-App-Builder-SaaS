@@ -1,22 +1,24 @@
 /**
- * projects/[id]/page.tsx — The builder workspace for one project.
- *
- * Special-cases the id "new": no project loads, and any ?prompt=&model= from
- * the dashboard is handed to the Builder, which auto-starts the generation and
- * swaps the URL to the real project id once it exists.
+ * projects/[id]/page.tsx — Builder workspace.
+ * Edge runtime + fully client-side rendering untuk kompatibilitas Cloudflare Pages.
  */
+"use client";
+
+export const runtime = "edge";
+
+import { use } from "react";
 import { Nav } from "@/components/nav";
 import { Builder } from "@/components/builder";
 
-export default async function ProjectPage({
+export default function ProjectPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { id } = await params;
-  const sp = await searchParams;
+  const { id } = use(params);
+  const sp = use(searchParams);
   const isNew = id === "new";
   const prompt = typeof sp.prompt === "string" ? sp.prompt : undefined;
   const model = typeof sp.model === "string" ? sp.model : undefined;

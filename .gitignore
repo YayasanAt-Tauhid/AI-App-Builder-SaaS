@@ -34,3 +34,7 @@ pnpm-debug.log*
 # Test / coverage
 coverage/
 .vitest/
+.wrangler-ids
+
+# Vercel build artifacts
+.vercel
