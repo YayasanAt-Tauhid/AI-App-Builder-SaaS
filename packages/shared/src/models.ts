@@ -11,14 +11,17 @@ import type { ModelInfo, Plan, PlanLimits } from "./types";
 
 /** OpenRouter model id untuk setiap catalog id. */
 export const PROVIDER_MODEL_IDS: Record<string, string> = {
-  "claude-opus":       "anthropic/claude-opus-4",
-  "claude-sonnet":     "anthropic/claude-sonnet-4-5",
-  "claude-haiku":      "anthropic/claude-haiku-4-5",
-  "gpt-4o":            "openai/gpt-4o",
-  "gpt-4o-mini":       "openai/gpt-4o-mini",
-  "gemini-1.5-pro":    "google/gemini-pro-1.5",
-  "gemini-1.5-flash":  "google/gemini-flash-1.5",
-  "deepseek-coder":    "deepseek/deepseek-chat",
+  // Untuk sekarang semua dipetakan ke model OpenRouter ":free" ($0) sehingga
+  // generate tidak menguras saldo. Label `provider` di katalog tetap pemilik
+  // asli (untuk UI/gating); backend aktual memakai model gratis di bawah ini.
+  "claude-opus":       "openai/gpt-oss-120b:free",
+  "claude-sonnet":     "qwen/qwen3-coder:free",
+  "claude-haiku":      "meta-llama/llama-3.2-3b-instruct:free",
+  "gpt-4o":            "openai/gpt-oss-120b:free",
+  "gpt-4o-mini":       "openai/gpt-oss-20b:free",
+  "gemini-1.5-pro":    "google/gemma-4-31b-it:free",
+  "gemini-1.5-flash":  "google/gemma-4-26b-a4b-it:free",
+  "deepseek-coder":    "deepseek/deepseek-v4-flash:free",
 };
 
 export const MODEL_CATALOG: ModelInfo[] = [
