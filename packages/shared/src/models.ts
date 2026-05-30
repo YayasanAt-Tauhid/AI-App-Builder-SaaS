@@ -11,17 +11,18 @@ import type { ModelInfo, Plan, PlanLimits } from "./types";
 
 /** OpenRouter model id untuk setiap catalog id. */
 export const PROVIDER_MODEL_IDS: Record<string, string> = {
-  // Semua dipetakan ke model OpenRouter ":free" ($0/M) sehingga generate tidak
-  // menguras saldo. Dipilih model yang kuat untuk coding; tier app dipertahankan
-  // hanya untuk gating/label UI. Pro-tier dapat model terkuat, free-tier ringan.
-  "claude-opus":       "moonshotai/kimi-k2.6:free",
-  "claude-sonnet":     "deepseek/deepseek-v4-flash:free",
-  "claude-haiku":      "openai/gpt-oss-20b:free",
-  "gpt-4o":            "nvidia/nemotron-3-super-120b-a12b:free",
-  "gpt-4o-mini":       "openai/gpt-oss-20b:free",
-  "gemini-1.5-pro":    "moonshotai/kimi-k2.6:free",
-  "gemini-1.5-flash":  "google/gemma-4-26b-a4b-it:free",
-  "deepseek-coder":    "deepseek/deepseek-v4-flash:free",
+  // Semua dipetakan ke model OpenRouter ":free" ($0/M). Diprioritaskan model
+  // yang kuat untuk *coding* (app ini generator kode). Qwen3 Coder 480B adalah
+  // model coding-khusus & jadi andalan; sisanya model free coding-capable.
+  // Cost guard di provider.ts menolak model non-":free" agar saldo tak terkuras.
+  "claude-opus":       "qwen/qwen3-coder:free",
+  "claude-sonnet":     "qwen/qwen3-coder:free",
+  "claude-haiku":      "deepseek/deepseek-v4-flash:free",
+  "gpt-4o":            "moonshotai/kimi-k2.6:free",
+  "gpt-4o-mini":       "qwen/qwen3-next-80b-a3b-instruct:free",
+  "gemini-1.5-pro":    "nvidia/nemotron-3-super-120b-a12b:free",
+  "gemini-1.5-flash":  "meta-llama/llama-3.3-70b-instruct:free",
+  "deepseek-coder":    "qwen/qwen3-coder:free",
 };
 
 export const MODEL_CATALOG: ModelInfo[] = [
