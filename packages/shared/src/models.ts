@@ -11,16 +11,16 @@ import type { ModelInfo, Plan, PlanLimits } from "./types";
 
 /** OpenRouter model id untuk setiap catalog id. */
 export const PROVIDER_MODEL_IDS: Record<string, string> = {
-  // Semua dipetakan ke model OpenRouter ":free" ($0/M). Diprioritaskan model
-  // yang kuat untuk *coding* (app ini generator kode). Qwen3 Coder 480B adalah
-  // model coding-khusus & jadi andalan; sisanya model free coding-capable.
-  // Cost guard di provider.ts menolak model non-":free" agar saldo tak terkuras.
+  // Semua ":free" ($0). Dipilih model yang STREAMING cepat & bukan reasoning
+  // model (yang "berpikir" diam lalu keluar sekaligus -> UI tampak 0 tokens).
+  // Llama 3.3 70B & Qwen3 Coder paling responsif untuk coding gratis.
+  // Cost guard di provider.ts menolak model non-":free".
   "claude-opus":       "qwen/qwen3-coder:free",
-  "claude-sonnet":     "qwen/qwen3-coder:free",
-  "claude-haiku":      "deepseek/deepseek-v4-flash:free",
-  "gpt-4o":            "moonshotai/kimi-k2.6:free",
-  "gpt-4o-mini":       "qwen/qwen3-next-80b-a3b-instruct:free",
-  "gemini-1.5-pro":    "nvidia/nemotron-3-super-120b-a12b:free",
+  "claude-sonnet":     "meta-llama/llama-3.3-70b-instruct:free",
+  "claude-haiku":      "meta-llama/llama-3.3-70b-instruct:free",
+  "gpt-4o":            "qwen/qwen3-coder:free",
+  "gpt-4o-mini":       "meta-llama/llama-3.3-70b-instruct:free",
+  "gemini-1.5-pro":    "qwen/qwen3-coder:free",
   "gemini-1.5-flash":  "meta-llama/llama-3.3-70b-instruct:free",
   "deepseek-coder":    "qwen/qwen3-coder:free",
 };
